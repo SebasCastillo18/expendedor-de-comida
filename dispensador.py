@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import time
 import threading
 import networkx as nx
@@ -42,21 +42,18 @@ def procesar_entrada(entrada):
     return productos.get(entrada, False)
 
 
-
 def construir_expresion_regular(transiciones):
-
     reglas = {}
     for (estado, simbolo), destino in transiciones.items():
         if estado not in reglas:
             reglas[estado] = []
         reglas[estado].append((simbolo, destino))
 
-  
     pasos = []
     for estado, lista in reglas.items():
         expresion = " + ".join([f"{s}{d}" for s, d in lista])
         pasos.append(f"{estado} = {expresion}")
-   
+
     destinos = {d for _, d in transiciones.items()}
     for d in destinos:
         if d not in reglas:
@@ -73,7 +70,6 @@ def construir_expresion_regular(transiciones):
             i = 0
             while i < len(parte):
                 if parte[i] == "q":
-                   
                     j = i + 1
                     while j < len(parte) and parte[j].isdigit():
                         j += 1
@@ -93,6 +89,7 @@ def construir_expresion_regular(transiciones):
     salida += "\n".join(pasos)
     salida += f"\n\n=== Expresión Regular Simplificada ===\nq0 = {simplificada}"
     return salida
+
 
 def dibujar_grafo(transiciones, finales, q0, contenedor):
     for widget in contenedor.winfo_children():
@@ -154,6 +151,14 @@ def verificar_entrada(event):
         resultado.config(text="")
         return
 
+  
+    if any(c not in alfabeto for c in entrada):
+        resultado.config(text="No pertenece al autómata ❌", fg="red")
+        info_automata.config(text="")
+        for widget in grafo_frame.winfo_children():
+            widget.destroy()
+        return
+
     estados, sigma, delta, q0, finales = construir_automata_para(entrada)
     resultado_producto = procesar_entrada(entrada)
 
@@ -173,20 +178,22 @@ def verificar_entrada(event):
 
     if resultado_producto:
         nombre_img, nombre, precio = resultado_producto
-        resultado.config(text=f"Pertenece  Al Automata✅\n{nombre} - {precio}", fg="green")
+        resultado.config(text=f"Pertenece al Autómata ✅\n{nombre} - {precio}", fg="green")
         dibujar_grafo(delta, finales, q0, grafo_frame)
         threading.Thread(target=animar_producto, args=(nombre_img,), daemon=True).start()
     else:
-        resultado.config(text="No pertenece Al Automata❌", fg="red")
+        resultado.config(text="No pertenece al Autómata ❌", fg="red")
         for widget in grafo_frame.winfo_children():
             widget.destroy()
+
+
 
 root = tk.Tk()
 root.title("Máquina Expendedora")
 root.geometry("1100x800")
 root.config(bg="#dfe8ff")
 
-# Frame con scroll
+# ==== Scroll general ====
 main_canvas = tk.Canvas(root, bg="#dfe8ff", highlightthickness=0)
 main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 scrollbar = ttk.Scrollbar(root, orient="vertical", command=main_canvas.yview)
@@ -202,10 +209,12 @@ def on_frame_configure(event):
 
 scroll_frame.bind("<Configure>", on_frame_configure)
 
+
 titulo = tk.Label(scroll_frame, text="MÁQUINA EXPENDEDORA",
                   font=("Arial Black", 20), bg="#dfe8ff", fg="#222")
 titulo.pack(pady=10)
 
+# ==== Entrada ====
 frame = tk.Frame(scroll_frame, bg="#dfe8ff")
 frame.pack()
 tk.Label(frame, text="Ingrese la secuencia (0=500, 1=1000):",
@@ -221,6 +230,7 @@ info_automata.pack(pady=10)
 resultado = tk.Label(scroll_frame, text="", font=("Arial", 16), bg="#dfe8ff")
 resultado.pack(pady=10)
 
+# ==== Área de animación ====
 maquina_frame = tk.Frame(scroll_frame, bg="#a7baff", bd=5, relief="ridge")
 maquina_frame.pack(pady=10)
 canvas_animacion = tk.Canvas(maquina_frame, width=400, height=220, bg="#f3f3f3")
@@ -228,33 +238,93 @@ canvas_animacion.pack(pady=10)
 tk.Label(maquina_frame, text="Máquina Expendedora",
          font=("Arial Black", 14), bg="#a7baff", fg="white").pack()
 
-
+# ==== Productos ====
 productos_frame = tk.LabelFrame(scroll_frame, text="Productos disponibles",
                                 font=("Arial", 14, "bold"), bg="#ffffff",
                                 padx=15, pady=15)
 productos_frame.pack(pady=10, padx=20, fill="x")
 
+def crear_imagen_redondeada(img, radius=20):
+    mask = Image.new("L", img.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle([0, 0, *img.size], radius, fill=255)
+    img.putalpha(mask)
+    return img
+
+def reflejo_azul(lbl_img, base_img):
+    img = base_img.copy()
+    w, h = img.size
+    for offset in range(-w, w * 2, 20):
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        for i in range(0, h, 2):
+            alpha = max(0, 180 - abs(i - (offset // 2)) * 4)
+            draw.line((offset + i, 0, offset + i - 50, h),
+                      fill=(80, 180, 255, alpha))
+        combined = Image.alpha_composite(img.convert("RGBA"), overlay)
+        tk_img = ImageTk.PhotoImage(combined)
+        lbl_img.config(image=tk_img)
+        lbl_img.image = tk_img
+        root.update()
+        time.sleep(0.02)
+
+def hover_enter(event):
+    frame = event.widget
+    frame.config(bg="#e3efff", highlightbackground="#7aa8ff")
+    for child in frame.winfo_children():
+        child.config(bg="#e3efff")
+        if isinstance(child, tk.Label) and "precio" in child._name:
+            child.config(bg="#1f6fff")
+    lbl_img = frame.lbl_img
+    threading.Thread(target=reflejo_azul, args=(lbl_img, frame.original_img), daemon=True).start()
+
+def hover_leave(event):
+    frame = event.widget
+    frame.config(bg="#f8f9ff", highlightbackground="#a3b3d1")
+    for child in frame.winfo_children():
+        child.config(bg="#f8f9ff")
+        if isinstance(child, tk.Label) and "precio" in child._name:
+            child.config(bg="#2b8aff")
+
+# ==== Mostrar productos ====
 row = col = 0
 for secuencia, (img_file, nombre, precio) in productos.items():
     try:
-        img = Image.open(img_file).resize((90, 90))
+        img = Image.open(img_file).resize((100, 100))
+        img = crear_imagen_redondeada(img)
         img_tk = ImageTk.PhotoImage(img)
     except:
         continue
 
-    frame_prod = tk.Frame(productos_frame, bg="white", padx=10, pady=10)
-    frame_prod.grid(row=row, column=col, padx=20, pady=20)
-    lbl_img = tk.Label(frame_prod, image=img_tk, bg="white")
+    frame_prod = tk.Frame(productos_frame, bg="#f8f9ff", padx=15, pady=15,
+                          highlightthickness=1, highlightbackground="#a3b3d1",
+                          relief="ridge", bd=3)
+    frame_prod.grid(row=row, column=col, padx=25, pady=25, ipadx=5, ipady=5)
+
+    lbl_img = tk.Label(frame_prod, image=img_tk, bg="#f8f9ff", name="imagen")
     lbl_img.image = img_tk
-    lbl_img.pack()
-    tk.Label(frame_prod, text=nombre, font=("Arial", 12, "bold"), bg="white").pack()
-    tk.Label(frame_prod, text=precio, font=("Arial", 11), fg="#333", bg="white").pack()
+    lbl_img.pack(pady=(0, 5))
+    frame_prod.lbl_img = lbl_img
+    frame_prod.original_img = img
+
+    lbl_nombre = tk.Label(frame_prod, text=nombre, font=("Arial", 12, "bold"),
+                          bg="#f8f9ff", fg="#003366", name="nombre")
+    lbl_nombre.pack()
+
+    lbl_precio = tk.Label(frame_prod, text=precio, font=("Arial", 11, "bold"),
+                          bg="#2b8aff", fg="white", padx=8, pady=3, name="precio")
+    lbl_precio.pack(pady=(3, 0))
+
+    frame_prod.bind("<Enter>", hover_enter)
+    frame_prod.bind("<Leave>", hover_leave)
+
     col += 1
     if col == 3:
         col = 0
         row += 1
 
-grafo_frame = tk.LabelFrame(scroll_frame, text="Visualización del Grafo del AFD",
+
+grafo_frame = tk.LabelFrame(scroll_frame, text="Visualización del Grafo",
                             font=("Arial", 14, "bold"), bg="#ffffff", padx=10, pady=10)
 grafo_frame.pack(pady=15, padx=20, fill="both", expand=True)
 
